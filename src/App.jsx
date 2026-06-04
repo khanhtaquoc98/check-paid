@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 
-const API_BASE = 'https://dat-com-ivory.vercel.app/api/orders';
+const API_BASE = 'https://check-paid.vercel.app/api/orders';
 const ADMIN_PASSCODE = '123456';
 
 // ========================================
