@@ -11,27 +11,44 @@ const ADMIN_PASSCODE = '123456';
 function extractLunchName(description) {
   if (!description) return null;
   const upper = description.toUpperCase();
-  const marker = 'CHUYEN KHOAN LUNCH';
-  const idx = upper.indexOf(marker);
-  if (idx === -1) return null;
 
-  // Get everything after the marker
-  let after = upper.substring(idx + marker.length).trim();
+  // Bank may inject spaces anywhere in the description (e.g., "KHOAN" → "KHO AN")
+  // So we match the marker in a spaceless version, then map back to the original string
+  const originalIndices = [];
+  for (let i = 0; i < upper.length; i++) {
+    if (upper[i] !== ' ') {
+      originalIndices.push(i);
+    }
+  }
+  const spaceless = upper.replace(/\s+/g, '');
+  const markerStr = 'CHUYENKHOANLUNCH';
+  const markerIdx = spaceless.indexOf(markerStr);
+  if (markerIdx === -1) return null;
+
+  const afterIdx = markerIdx + markerStr.length;
+  if (afterIdx >= spaceless.length) return null;
+
+  // Get text after the marker in the original string
+  let after = upper.substring(originalIndices[afterIdx]).trim();
 
   // The name ends at common delimiters
   // e.g. "KANE   Ma giao dich..." or "MIC HAEL-CHUYEN TIEN..." or "ADA M. TU: ZION"
-  // We stop at: dash followed by known keywords, period+space, or multiple spaces before lowercase-ish
-  // Strategy: take chars until we hit a delimiter pattern
+  //      "KEVIN FT26155877..." or "HARRY.CT tu..." or "CLI NT- Ma GD..."
   const delimiters = [
-    /\s{2,}Ma\s/i,        // "   Ma giao dich"
+    /\.\w/,                // period + letter/digit (HARRY.CT)
+    /-\s/,                 // dash + space (CLI NT- Ma GD)
     /-CHUYEN/i,            // "-CHUYEN TIEN"
+    /\s+FT\d/i,            // transaction ref FT + digits
+    /\s+CT\s/i,            // CT transaction type
+    /\s+\d/,               // space + digit (transition to numbers)
+    /\s{2,}Ma\s/i,         // "   Ma giao dich"
     /\.\s+TU:/i,           // ". TU: ZION"
     /\s+Ma\s+giao/i,       // " Ma giao"
-    /-\s*$/,
+    /\s+Ma\s+GD/i,         // " Ma GD"
+    /-\s*$/,               // trailing dash
   ];
 
-  // First, try to find the earliest delimiter
-  let nameStr = after;
+  // Find the earliest delimiter
   let endPos = after.length;
 
   for (const delim of delimiters) {
@@ -41,7 +58,7 @@ function extractLunchName(description) {
     }
   }
 
-  nameStr = after.substring(0, endPos).trim();
+  const nameStr = after.substring(0, endPos).trim();
 
   // Remove extra spaces (bank may inject spaces in name: "MIC HAEL" → "MICHAEL")
   const cleanedName = nameStr.replace(/\s+/g, '');
@@ -50,12 +67,25 @@ function extractLunchName(description) {
 }
 
 // ========================================
+// Utility: Remove Vietnamese diacritics for matching
+// e.g. "Ram văn Bô" → "Ram van Bo"
+// ========================================
+function removeDiacritics(str) {
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+}
+
+// ========================================
 // Utility: Fuzzy match bank name to order userName
+// Bank names never have diacritics, but order names may (Vietnamese)
 // ========================================
 function matchNameToUser(bankName, userName) {
   if (!bankName || !userName) return false;
   const cleanBank = bankName.replace(/\s+/g, '').toUpperCase();
-  const cleanUser = userName.replace(/\s+/g, '').toUpperCase();
+  const cleanUser = removeDiacritics(userName).replace(/\s+/g, '').toUpperCase();
   return cleanBank === cleanUser;
 }
 
