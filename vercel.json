@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://dat-com-ivory.vercel.app/api/:path*"
+    }
+  ]
+}
