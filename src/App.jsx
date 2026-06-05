@@ -40,6 +40,7 @@ function extractLunchName(description) {
     /-CHUYEN/i,            // "-CHUYEN TIEN"
     /\s+FT\d/i,            // transaction ref FT + digits
     /\s+CT\s/i,            // CT transaction type
+    /\s+(?=[A-Z]*\d)(?=\d*[A-Z])[A-Z\d]{4,}/i, // mixed alphanumeric ref code (I2A7RXGG)
     /\s+\d/,               // space + digit (transition to numbers)
     /\s{2,}Ma\s/i,         // "   Ma giao dich"
     /\.\s+TU:/i,           // ". TU: ZION"

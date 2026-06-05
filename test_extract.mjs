@@ -18,6 +18,7 @@ function extractLunchName(description) {
     /-CHUYEN/i,
     /\s+FT\d/i,
     /\s+CT\s/i,
+    /\s+(?=[A-Z]*\d)(?=\d*[A-Z])[A-Z\d]{4,}/i,
     /\s+\d/,
     /\s{2,}Ma\s/i,
     /\.\s+TU:/i,
@@ -42,6 +43,7 @@ const cases = [
   { input: 'CHUYEN KHOAN LUNCH KANE   Ma giao dich 12345', expected: 'KANE' },
   { input: 'CHUYEN KHOAN LUNCH MIC HAEL-CHUYEN TIEN ABC', expected: 'MICHAEL' },
   { input: 'CHUYEN KHOAN LUNCH ADA M. TU: ZION', expected: 'ADAM' },
+  { input: 'HUYNH NGUYEN QUANG TIN CHUYEN KHOAN LUNCH MICHAEL I2A7RXGG /122747', expected: 'MICHAEL' },
 ];
 
 for (const c of cases) {
