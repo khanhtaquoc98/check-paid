@@ -41,7 +41,12 @@ export default async function handler(req, res) {
     }
 
     console.log(`[MB] Logging in as ${username}...`);
-    const mb = new MB({ username, password });
+    const mb = new MB({
+      username,
+      password,
+      preferredOCRMethod: 'default',
+      saveWasm: true,
+    });
 
     try {
       await mb.login();
