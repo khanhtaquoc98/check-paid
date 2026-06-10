@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 4321",
     "build": "next build",
-    "start": "next start -p ${PORT:-4321}"
+    "start": "HOSTNAME=0.0.0.0 PORT=${PORT:-4321} node .next/standalone/server.js"
   },
   "dependencies": {
     "mbbank": "^1.8.10",
