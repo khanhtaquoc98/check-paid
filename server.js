@@ -7,22 +7,28 @@
 // Fix: 1) Block global.window pollution
 //      2) Use custom server that passes parsedUrl to handler, bypassing parseUrl()
 
-// ── Step 1: Prevent window pollution BEFORE loading anything ──
-if (typeof global.window !== 'undefined' && !global.window.location) {
-  delete global.window;
+// ── Step 1: Fix window pollution BEFORE loading anything ──
+// mbbank sets globalThis.window = { globalThis, document: { welovemb: true } }
+// WITHOUT .location → Next.js reads window.location.protocol → crash
+// Fix: allow window but auto-inject fallback .location
+if (typeof global.window !== 'undefined' && global.window && !global.window.location) {
+  global.window.location = {
+    protocol: 'https:', hostname: 'localhost', port: '',
+    href: 'https://localhost', origin: 'https://localhost',
+  };
 }
 
 let _safeWindow;
 Object.defineProperty(global, 'window', {
-  get() {
-    return _safeWindow;
-  },
+  get() { return _safeWindow; },
   set(val) {
-    // Only allow setting if it has a real location (browser-like env) or is undefined/null
-    if (!val || (val.location && val.location.protocol)) {
-      _safeWindow = val;
+    _safeWindow = val;
+    if (val && typeof val === 'object' && !val.location) {
+      val.location = {
+        protocol: 'https:', hostname: 'localhost', port: '',
+        href: 'https://localhost', origin: 'https://localhost',
+      };
     }
-    // Otherwise silently block — some package tried to set window = {}
   },
   configurable: true,
 });

@@ -1,17 +1,33 @@
 // fix-ssr-window.js
-// Prevents npm packages (mbbank, xlsx) from polluting global.window on the server,
-// which causes Next.js to crash with "Cannot destructure property 'protocol' of 'window.location'"
+// Fixes "Cannot destructure property 'protocol' of 'window.location'"
+//
+// Problem: mbbank sets globalThis.window = { globalThis, document: ... }
+//          WITHOUT .location → Next.js reads window.location.protocol → crash
+//
+// Solution: Let packages set window, but ensure .location always has protocol/hostname
+//           so Next.js getLocationOrigin() works correctly.
 
-if (typeof global.window !== 'undefined' && !global.window.location) {
+if (typeof global.window !== 'undefined' && global.window && !global.window.location) {
   delete global.window;
 }
 
 let _safeWindow;
 Object.defineProperty(global, 'window', {
-  get() { return _safeWindow; },
+  get() {
+    return _safeWindow;
+  },
   set(val) {
-    if (!val || (val.location && val.location.protocol)) {
-      _safeWindow = val;
+    _safeWindow = val;
+    // If a package sets window without location (like mbbank does),
+    // add a fallback location so Next.js doesn't crash
+    if (val && typeof val === 'object' && !val.location) {
+      val.location = {
+        protocol: 'https:',
+        hostname: 'localhost',
+        port: '',
+        href: 'https://localhost',
+        origin: 'https://localhost',
+      };
     }
   },
   configurable: true,
