@@ -1064,3 +1064,38 @@ body::before {
     transform: translateY(0);
   }
 }
+
+/* ============ Navigation Links ============ */
+
+.nav-links-container {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.nav-link {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text-muted);
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  transition: all 0.25s var(--ease-out-expo);
+}
+
+.nav-link:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+  background: var(--bg-card-hover);
+}
+
+.nav-link--active {
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border-color: var(--accent-emerald);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+

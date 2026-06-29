@@ -2,60 +2,60 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Head from 'next/head';
 import * as XLSX from 'xlsx';
 
-const ORDERS_API = '/api/orders';
+const UNPAIDS_API = '/api/unpaids';
 const MB_API = '/api/mb/transactions';
 const ADMIN_PASSCODE = '123456';
 
 // ========================================
-// Utility: Extract name from bank transfer description
-// Pattern: "CHUYEN KHOAN LUNCH {NAME}" — name may have spaces injected
+// Utility: Extract name & quantity from bank transfer description
+// Pattern: "Lunch {userName} x{SL}" or fallback "Lunch {userName}"
 // ========================================
-function extractLunchName(description) {
+function extractLunchDetails(description) {
   if (!description) return null;
-  const upper = description.toUpperCase();
-
-  const originalIndices = [];
-  for (let i = 0; i < upper.length; i++) {
-    if (upper[i] !== ' ') {
-      originalIndices.push(i);
-    }
-  }
-  const spaceless = upper.replace(/\s+/g, '');
-  const markerStr = 'CHUYENKHOANLUNCH';
-  const markerIdx = spaceless.indexOf(markerStr);
-  if (markerIdx === -1) return null;
-
-  const afterIdx = markerIdx + markerStr.length;
-  if (afterIdx >= spaceless.length) return null;
-
-  let after = upper.substring(originalIndices[afterIdx]).trim();
-
-  const delimiters = [
-    /\.\w/,
-    /-\s/,
-    /-CHUYEN/i,
-    /\s+FT\d/i,
-    /\s+CT\s/i,
-    /\s+(?=[A-Z]*\d)(?=\d*[A-Z])[A-Z\d]{4,}/i,
-    /\s+\d/,
-    /\s{2,}Ma\s/i,
-    /\.\s+TU:/i,
-    /\s+Ma\s+giao/i,
-    /\s+Ma\s+GD/i,
-    /-\s*$/,
-  ];
-
-  let endPos = after.length;
-  for (const delim of delimiters) {
-    const match = after.match(delim);
-    if (match && match.index < endPos) {
-      endPos = match.index;
-    }
+  const regex = /LUNCH\s+([A-Z0-9a-zÀ-ỹ\s]+?)\s*X\s*(\d+)/i;
+  const match = description.match(regex);
+  if (match) {
+    return {
+      userName: match[1].trim(),
+      quantity: parseInt(match[2], 10),
+    };
   }
 
-  const nameStr = after.substring(0, endPos).trim();
-  const cleanedName = nameStr.replace(/\s+/g, '');
-  return cleanedName || null;
+  // Fallback: Lunch {userName} without x{SL}
+  const regexNoQty = /LUNCH\s+([A-Z0-9a-zÀ-ỹ\s]+)/i;
+  const matchNoQty = description.match(regexNoQty);
+  if (matchNoQty) {
+    let namePart = matchNoQty[1].trim();
+    const delimiters = [
+      /\.\w/,
+      /-\s/,
+      /-CHUYEN/i,
+      /\s+FT\d/i,
+      /\s+CT\s/i,
+      /\s+(?=[A-Z]*\d)(?=\d*[A-Z])[A-Z\d]{4,}/i,
+      /\s+\d/,
+      /\s{2,}Ma\s/i,
+      /\.\s+TU:/i,
+      /\s+Ma\s+giao/i,
+      /\s+Ma\s+GD/i,
+      /-\s*$/,
+    ];
+    let endPos = namePart.length;
+    for (const delim of delimiters) {
+      const match = namePart.match(delim);
+      if (match && match.index < endPos) {
+        endPos = match.index;
+      }
+    }
+    const cleanedName = namePart.substring(0, endPos).trim();
+    if (cleanedName) {
+      return {
+        userName: cleanedName,
+        quantity: 1,
+      };
+    }
+  }
+  return null;
 }
 
 // ========================================
@@ -74,7 +74,7 @@ function removeDiacritics(str) {
 // ========================================
 function matchNameToUser(bankName, userName) {
   if (!bankName || !userName) return false;
-  const cleanBank = bankName.replace(/\s+/g, '').toUpperCase();
+  const cleanBank = removeDiacritics(bankName).replace(/\s+/g, '').toUpperCase();
   const cleanUser = removeDiacritics(userName).replace(/\s+/g, '').toUpperCase();
   return cleanBank === cleanUser;
 }
@@ -93,16 +93,18 @@ function parseTransactions(workbook) {
     const details = row[11];
 
     if (stt && !isNaN(Number(stt)) && details) {
-      const name = extractLunchName(String(details));
-      if (name) {
+      const detailsStr = String(details);
+      const detailsObj = extractLunchDetails(detailsStr);
+      if (detailsObj) {
         transactions.push({
           stt: Number(stt),
           date: row[4] || '',
           transNo: row[6] || '',
           debit: row[9] || '0',
           credit: row[10] || '0',
-          details: String(details),
-          extractedName: name,
+          details: detailsStr,
+          extractedName: detailsObj.userName,
+          quantity: detailsObj.quantity,
         });
       }
     }
@@ -117,11 +119,10 @@ function parseMBTransactions(mbTransactions) {
   const transactions = [];
   for (let i = 0; i < mbTransactions.length; i++) {
     const txn = mbTransactions[i];
-    // MB Bank API field: transactionDesc (not description)
     const desc = txn.transactionDesc || txn.description || txn.addDescription || '';
-    const name = extractLunchName(desc);
+    const detailsObj = extractLunchDetails(desc);
 
-    if (name) {
+    if (detailsObj) {
       transactions.push({
         stt: i + 1,
         date: txn.transactionDate || txn.postDate || '',
@@ -129,7 +130,8 @@ function parseMBTransactions(mbTransactions) {
         debit: txn.debitAmount || '0',
         credit: txn.creditAmount || '0',
         details: desc,
-        extractedName: name,
+        extractedName: detailsObj.userName,
+        quantity: detailsObj.quantity,
         source: 'mbbank',
       });
     }
@@ -174,8 +176,8 @@ function todayStr() {
 // ========================================
 // Main Page
 // ========================================
-export default function Home() {
-  const [orders, setOrders] = useState([]);
+export default function Unpaids() {
+  const [unpaids, setUnpaids] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [matches, setMatches] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -232,12 +234,12 @@ export default function Home() {
   // ========================================
   // Find matches helper
   // ========================================
-  const findMatches = (orderList, txnList) => {
+  const findMatches = (unpaidList, txnList) => {
     const result = [];
     for (const txn of txnList) {
-      for (const order of orderList) {
-        if (!order.paid && matchNameToUser(txn.extractedName, order.userName)) {
-          result.push({ transaction: txn, order });
+      for (const item of unpaidList) {
+        if (!item.paid && matchNameToUser(txn.extractedName, item.userName)) {
+          result.push({ transaction: txn, order: item });
         }
       }
     }
@@ -245,29 +247,34 @@ export default function Home() {
   };
 
   // ========================================
-  // Fetch Orders
+  // Fetch Unpaids
   // ========================================
-  const fetchOrders = useCallback(async () => {
+  const fetchUnpaids = useCallback(async () => {
     setLoading(true);
-    addLog('Đang tải danh sách đơn hàng...', 'info');
+    addLog('Đang tải danh sách chưa thanh toán...', 'info');
     try {
-      const res = await fetch(ORDERS_API);
+      const res = await fetch(UNPAIDS_API);
       const data = await res.json();
-      if (data.success && data.orders) {
-        setOrders(data.orders);
-        addLog(`Tải thành công ${data.orders.length} đơn hàng`, 'success');
-        addToast(`Đã tải ${data.orders.length} đơn hàng`, 'success');
+      if (data.success && data.unpaids) {
+        setUnpaids(data.unpaids);
+        addLog(`Tải thành công ${data.unpaids.length} đơn hàng chưa thanh toán`, 'success');
+        addToast(`Đã tải ${data.unpaids.length} đơn hàng chưa thanh toán`, 'success');
+
+        if (data.config && data.config.accountNo) {
+          setMbAccountNumber(prev => prev || data.config.accountNo);
+          setMbUsername(prev => prev || data.config.accountNo);
+        }
 
         if (transactions.length > 0) {
-          const newMatches = findMatches(data.orders, transactions);
+          const newMatches = findMatches(data.unpaids, transactions);
           setMatches(newMatches);
         }
       } else {
-        addLog('Không có dữ liệu đơn hàng', 'warning');
+        addLog('Không có dữ liệu đơn hàng chưa thanh toán', 'warning');
       }
     } catch (err) {
-      addLog(`Lỗi tải đơn hàng: ${err.message}`, 'error');
-      addToast('Lỗi tải đơn hàng!', 'error');
+      addLog(`Lỗi tải đơn hàng chưa thanh toán: ${err.message}`, 'error');
+      addToast('Lỗi tải dữ liệu chưa thanh toán!', 'error');
     } finally {
       setLoading(false);
     }
@@ -275,35 +282,35 @@ export default function Home() {
 
   // Auto fetch on mount
   useEffect(() => {
-    fetchOrders();
+    fetchUnpaids();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========================================
-  // Pay single order
+  // Pay all orders of a user
   // ========================================
-  const payOrder = useCallback(async (orderId) => {
-    setPaying(prev => new Set(prev).add(orderId));
-    addLog(`Đang thanh toán đơn ${orderId}...`, 'info');
+  const payUser = useCallback(async (userName) => {
+    setPaying(prev => new Set(prev).add(userName));
+    addLog(`Đang thanh toán tất cả đơn hàng cho ${userName}...`, 'info');
 
     try {
-      const res = await fetch(ORDERS_API, {
+      const res = await fetch(UNPAIDS_API, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'x-admin-passcode': ADMIN_PASSCODE,
         },
-        body: JSON.stringify({ orderId, paid: true }),
+        body: JSON.stringify({ action: 'pay_all', userName }),
       });
 
       const data = await res.json();
 
-      if (res.ok) {
-        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paid: true } : o));
-        setMatches(prev => prev.filter(m => m.order.id !== orderId));
-        addLog(`✓ Đã thanh toán đơn ${orderId}`, 'success');
-        addToast(`Đã thanh toán thành công!`, 'success');
+      if (res.ok && data.success) {
+        setUnpaids(prev => prev.map(o => o.userName === userName ? { ...o, paid: true } : o));
+        setMatches(prev => prev.filter(m => m.order.userName !== userName));
+        addLog(`✓ Đã thanh toán tất cả đơn hàng của ${userName}`, 'success');
+        addToast(`Thanh toán thành công cho ${userName}!`, 'success');
       } else {
-        addLog(`✗ Lỗi thanh toán đơn ${orderId}: ${JSON.stringify(data)}`, 'error');
+        addLog(`✗ Lỗi thanh toán cho ${userName}: ${JSON.stringify(data)}`, 'error');
         addToast('Lỗi thanh toán!', 'error');
       }
     } catch (err) {
@@ -312,32 +319,57 @@ export default function Home() {
     } finally {
       setPaying(prev => {
         const next = new Set(prev);
-        next.delete(orderId);
+        next.delete(userName);
         return next;
       });
     }
   }, [addLog, addToast]);
 
   // ========================================
-  // Auto pay matches
+  // Auto pay all matches (button)
   // ========================================
-  const autoPayMatches = useCallback(async (matchList) => {
-    if (!matchList || matchList.length === 0) return;
-    setAutoPayProgress({ current: 0, total: matchList.length, running: true });
+  const autoPayAll = useCallback(async () => {
+    if (matches.length === 0) return;
+    const uniqueUserNames = Array.from(new Set(matches.map(m => m.order.userName)));
+    setAutoPayProgress({ current: 0, total: uniqueUserNames.length, running: true });
+    addLog(`▸ Bắt đầu tự động thanh toán cho ${uniqueUserNames.length} người dùng khớp...`, 'info');
 
-    for (let i = 0; i < matchList.length; i++) {
-      const { order } = matchList[i];
+    for (let i = 0; i < uniqueUserNames.length; i++) {
+      const userName = uniqueUserNames[i];
       setAutoPayProgress(prev => ({ ...prev, current: i + 1 }));
-      await payOrder(order.id);
-      if (i < matchList.length - 1) {
+      await payUser(userName);
+      if (i < uniqueUserNames.length - 1) {
         await new Promise(r => setTimeout(r, 500));
       }
     }
 
     setAutoPayProgress({ current: 0, total: 0, running: false });
-    addLog(`▸ Hoàn tất auto-pay ${matchList.length} đơn!`, 'success');
-    addToast('Auto-pay hoàn tất!', 'success');
-  }, [payOrder, addLog, addToast]);
+    addLog(`▸ Hoàn tất tự động thanh toán!`, 'success');
+    addToast('Hoàn tất tự động thanh toán!', 'success');
+  }, [matches, payUser, addLog, addToast]);
+
+  // ========================================
+  // Auto pay matches (triggered after loading bank or excel)
+  // ========================================
+  const autoPayMatches = useCallback(async (matchList) => {
+    if (!matchList || matchList.length === 0) return;
+    const uniqueUserNames = Array.from(new Set(matchList.map(m => m.order.userName)));
+    setAutoPayProgress({ current: 0, total: uniqueUserNames.length, running: true });
+    addLog(`▸ Bắt đầu tự động thanh toán cho ${uniqueUserNames.length} người dùng khớp...`, 'info');
+
+    for (let i = 0; i < uniqueUserNames.length; i++) {
+      const userName = uniqueUserNames[i];
+      setAutoPayProgress(prev => ({ ...prev, current: i + 1 }));
+      await payUser(userName);
+      if (i < uniqueUserNames.length - 1) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    setAutoPayProgress({ current: 0, total: 0, running: false });
+    addLog(`▸ Hoàn tất tự động thanh toán!`, 'success');
+    addToast('Hoàn tất tự động thanh toán!', 'success');
+  }, [payUser, addLog, addToast]);
 
   // ========================================
   // MB Bank: Fetch transactions
@@ -353,7 +385,7 @@ export default function Home() {
     }
 
     setMbLoading(true);
-    addLog(`[MB Bank] Đang đăng nhập với tài khoản ${mbUsername}...`, 'info');
+    addLog(`[MB Bank] Đang đăng nhập tài khoản ${mbUsername}...`, 'info');
 
     try {
       const res = await fetch(MB_API, {
@@ -368,14 +400,13 @@ export default function Home() {
         }),
       });
 
-      // Safe JSON parse — handle non-JSON responses (e.g. HTML error pages)
       const text = await res.text();
       let data;
       try {
         data = JSON.parse(text);
       } catch {
         addLog(`[MB Bank] Server trả về lỗi: ${text.substring(0, 200)}`, 'error');
-        addToast('Server lỗi! Kiểm tra terminal log.', 'error');
+        addToast('Lỗi máy chủ! Vui lòng kiểm tra log.', 'error');
         return;
       }
 
@@ -386,27 +417,26 @@ export default function Home() {
       }
 
       const allMBTxns = data.transactions || [];
-      addLog(`[MB Bank] Nhận được ${allMBTxns.length} giao dịch tổng`, 'info');
+      addLog(`[MB Bank] Nhận được ${allMBTxns.length} giao dịch`, 'info');
 
       const txns = parseMBTransactions(allMBTxns);
       setTransactions(txns);
       setMbTxnCount(allMBTxns.length);
-      addLog(`[MB Bank] Tìm thấy ${txns.length} giao dịch "CHUYEN KHOAN LUNCH"`, 'success');
+      addLog(`[MB Bank] Tìm thấy ${txns.length} giao dịch khớp "Lunch {userName} x{SL}"`, 'success');
 
       if (txns.length === 0) {
-        addToast(`Nhận ${allMBTxns.length} giao dịch, nhưng không có LUNCH`, 'error');
+        addToast(`Đọc ${allMBTxns.length} giao dịch, không tìm thấy cú pháp LUNCH`, 'error');
         return;
       }
 
       addToast(`Đã đọc ${txns.length} giao dịch LUNCH từ MB Bank`, 'success');
 
-      if (orders.length > 0) {
-        const newMatches = findMatches(orders, txns);
+      if (unpaids.length > 0) {
+        const newMatches = findMatches(unpaids, txns);
         setMatches(newMatches);
-        addLog(`Tìm thấy ${newMatches.length} khớp`, newMatches.length > 0 ? 'success' : 'warning');
+        addLog(`Tìm thấy ${newMatches.length} khớp trùng tên`, newMatches.length > 0 ? 'success' : 'warning');
 
         if (newMatches.length > 0) {
-          addLog(`▸ Tự động thanh toán ${newMatches.length} đơn hàng khớp...`, 'info');
           autoPayMatches(newMatches);
         }
       }
@@ -416,7 +446,7 @@ export default function Home() {
     } finally {
       setMbLoading(false);
     }
-  }, [mbUsername, mbPassword, mbAccountNumber, mbStartDate, mbEndDate, orders, addLog, addToast, autoPayMatches]);
+  }, [mbUsername, mbPassword, mbAccountNumber, mbStartDate, mbEndDate, unpaids, addLog, addToast, autoPayMatches]);
 
   // ========================================
   // Handle file upload
@@ -425,7 +455,7 @@ export default function Home() {
     if (!file) return;
     setFileName(file.name);
     setFileSize(file.size);
-    addLog(`Đang đọc file: ${file.name}`, 'info');
+    addLog(`Đang đọc file Excel: ${file.name}`, 'info');
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -434,22 +464,21 @@ export default function Home() {
         const workbook = XLSX.read(data, { type: 'array' });
         const txns = parseTransactions(workbook);
         setTransactions(txns);
-        addLog(`Tìm thấy ${txns.length} giao dịch "CHUYEN KHOAN LUNCH"`, 'success');
+        addLog(`Tìm thấy ${txns.length} giao dịch khớp cú pháp LUNCH`, 'success');
 
         if (txns.length === 0) {
-          addToast('Không tìm thấy giao dịch LUNCH trong file', 'error');
+          addToast('Không tìm thấy giao dịch LUNCH trong file Excel', 'error');
           return;
         }
 
         addToast(`Đã đọc ${txns.length} giao dịch từ file`, 'success');
 
-        if (orders.length > 0) {
-          const newMatches = findMatches(orders, txns);
+        if (unpaids.length > 0) {
+          const newMatches = findMatches(unpaids, txns);
           setMatches(newMatches);
           addLog(`Tìm thấy ${newMatches.length} khớp`, newMatches.length > 0 ? 'success' : 'warning');
 
           if (newMatches.length > 0) {
-            addLog(`▸ Tự động thanh toán ${newMatches.length} đơn hàng khớp...`, 'info');
             autoPayMatches(newMatches);
           }
         }
@@ -459,30 +488,7 @@ export default function Home() {
       }
     };
     reader.readAsArrayBuffer(file);
-  }, [orders, addLog, addToast, autoPayMatches]);
-
-  // ========================================
-  // Auto pay all matches (button)
-  // ========================================
-  const autoPayAll = useCallback(async () => {
-    if (matches.length === 0) return;
-    const toPay = [...matches];
-    setAutoPayProgress({ current: 0, total: toPay.length, running: true });
-    addLog(`▸ Bắt đầu auto-pay ${toPay.length} đơn hàng...`, 'info');
-
-    for (let i = 0; i < toPay.length; i++) {
-      const { order } = toPay[i];
-      setAutoPayProgress(prev => ({ ...prev, current: i + 1 }));
-      await payOrder(order.id);
-      if (i < toPay.length - 1) {
-        await new Promise(r => setTimeout(r, 500));
-      }
-    }
-
-    setAutoPayProgress({ current: 0, total: 0, running: false });
-    addLog(`▸ Hoàn tất auto-pay!`, 'success');
-    addToast('Auto-pay hoàn tất!', 'success');
-  }, [matches, payOrder, addLog, addToast]);
+  }, [unpaids, addLog, addToast, autoPayMatches]);
 
   // ========================================
   // File drop handlers
@@ -507,38 +513,38 @@ export default function Home() {
   // ========================================
   // Stats
   // ========================================
-  const paidCount = orders.filter(o => o.paid).length;
-  const unpaidCount = orders.filter(o => !o.paid).length;
+  const paidCount = unpaids.filter(o => o.paid).length;
+  const unpaidCount = unpaids.filter(o => !o.paid).length;
 
   return (
     <>
       <Head>
-        <title>Auto Paid - Lunch Order Payment</title>
-        <meta name="description" content="Auto Payment Tool - Tự động đối chiếu giao dịch và thanh toán đơn hàng" />
+        <title>Auto Paid - Unpaids Check</title>
+        <meta name="description" content="Auto Payment Tool - Check danh sách đơn hàng chưa thanh toán" />
       </Head>
 
       <div className="app-container">
         {/* Header */}
         <header className="app-header slide-up">
-          <h1>⚡ Auto Paid</h1>
-          <p>Tự động đối chiếu giao dịch ngân hàng và thanh toán đơn hàng lunch</p>
+          <h1>⚡ Auto Paid Check</h1>
+          <p>Tự động đối chiếu giao dịch ngân hàng và thanh toán các đơn hàng chưa thanh toán</p>
           <div className="nav-links-container">
-            <a href="/" className="nav-link nav-link--active">Trang chủ</a>
-            <a href="/unpaids" className="nav-link">Chưa thanh toán</a>
+            <a href="/" className="nav-link">Trang chủ</a>
+            <a href="/unpaids" className="nav-link nav-link--active">Chưa thanh toán</a>
           </div>
         </header>
 
         {/* Stats Bar */}
-        {orders.length > 0 && (
+        {unpaids.length > 0 && (
           <div className="action-bar slide-up">
             <div className="action-bar-info">
               <div className="stat">
-                <div className="stat-value stat-value--blue">{orders.length}</div>
+                <div className="stat-value stat-value--blue">{unpaids.length}</div>
                 <div className="stat-label">Tổng đơn</div>
               </div>
               <div className="stat">
                 <div className="stat-value stat-value--emerald">{paidCount}</div>
-                <div className="stat-label">Đã trả</div>
+                <div className="stat-label">Đã xử lý</div>
               </div>
               <div className="stat">
                 <div className="stat-value stat-value--red">{unpaidCount}</div>
@@ -550,7 +556,7 @@ export default function Home() {
               </div>
             </div>
             <div className="action-bar-buttons">
-              <button className="btn btn--secondary btn--sm" onClick={fetchOrders} disabled={loading}>
+              <button className="btn btn--secondary btn--sm" onClick={fetchUnpaids} disabled={loading}>
                 {loading ? <><span className="spinner"></span> Đang tải...</> : '🔄 Refresh'}
               </button>
               <button
@@ -774,8 +780,11 @@ export default function Home() {
                   >
                     <div className="match-bank">
                       <strong>{m.transaction.extractedName}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--accent-amber)', marginLeft: 8 }}>
+                        (x{m.transaction.quantity})
+                      </span>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                        {m.transaction.credit}đ
+                        {m.transaction.details}
                       </div>
                     </div>
                     <div className="match-arrow">→</div>
@@ -803,13 +812,13 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Orders List */}
+        {/* Unpaids List */}
         <div className="section slide-up" style={{ animationDelay: '0.2s' }}>
           <div className="section-title">
-            🍽️ Danh sách đơn hàng
-            {orders.length > 0 && <span className="count">{orders.length}</span>}
+            🍽️ Danh sách chưa thanh toán
+            {unpaids.length > 0 && <span className="count">{unpaids.length}</span>}
           </div>
-          {orders.length > 0 ? (
+          {unpaids.length > 0 ? (
             <>
               <div className="order-header">
                 <div></div>
@@ -820,9 +829,9 @@ export default function Home() {
                 <div style={{ textAlign: 'right' }}>Hành động</div>
               </div>
               <div className="orders-grid">
-                {orders.map((order, i) => {
+                {unpaids.map((order, i) => {
                   const isMatched = matches.some(m => m.order.id === order.id);
-                  const isPaying = paying.has(order.id);
+                  const isPaying = paying.has(order.userName);
                   const avatarColor = getAvatarColor(order.userName);
 
                   return (
@@ -839,7 +848,7 @@ export default function Home() {
                       </div>
                       <div className="order-name">{order.userName}</div>
                       <div className="order-dishes">
-                        {order.dishes.map(d => d.name).join(', ')}
+                        {order.dishes.map(d => `${d.name} (${d.paid ? 'Đã trả' : 'Chưa trả'})`).join(', ')}
                       </div>
                       <div className="order-price">{formatPrice(order.totalPrice)}</div>
                       <div className="order-status">
@@ -859,9 +868,9 @@ export default function Home() {
                         {!order.paid && !isPaying && (
                           <button
                             className="btn btn--primary btn--sm"
-                            onClick={() => payOrder(order.id)}
+                            onClick={() => payUser(order.userName)}
                           >
-                            Pay
+                            Pay All
                           </button>
                         )}
                       </div>
@@ -875,7 +884,7 @@ export default function Home() {
               <div className="empty-state">
                 <div className="empty-state-icon">📦</div>
                 <div className="empty-state-text">
-                  {loading ? 'Đang tải đơn hàng...' : 'Không có đơn hàng'}
+                  {loading ? 'Đang tải đơn hàng...' : 'Không có đơn hàng chưa thanh toán'}
                 </div>
               </div>
             </div>
