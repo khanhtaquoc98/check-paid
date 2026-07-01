@@ -8,11 +8,12 @@ const ADMIN_PASSCODE = '123456';
 
 // ========================================
 // Utility: Extract name & quantity from bank transfer description
-// Pattern: "Lunch {userName} x{SL}" or fallback "Lunch {userName}"
+// Pattern: "PaidLunch {userName} x{SL}" or fallback "PaidLunch {userName}"
+// Also supports legacy "Lunch ..." syntax.
 // ========================================
 function extractLunchDetails(description) {
   if (!description) return null;
-  const regex = /LUNCH\s+([A-Z0-9a-zÀ-ỹ\s]+?)\s*X\s*(\d+)/i;
+  const regex = /(?:PAID)?LUNCH\s+([A-Z0-9a-zÀ-ỹ\s]+?)\s*X\s*(\d+)/i;
   const match = description.match(regex);
   if (match) {
     return {
@@ -21,8 +22,8 @@ function extractLunchDetails(description) {
     };
   }
 
-  // Fallback: Lunch {userName} without x{SL}
-  const regexNoQty = /LUNCH\s+([A-Z0-9a-zÀ-ỹ\s]+)/i;
+  // Fallback: PaidLunch {userName} without x{SL}
+  const regexNoQty = /(?:PAID)?LUNCH\s+([A-Z0-9a-zÀ-ỹ\s]+)/i;
   const matchNoQty = description.match(regexNoQty);
   if (matchNoQty) {
     let namePart = matchNoQty[1].trim();
@@ -422,14 +423,14 @@ export default function Unpaids() {
       const txns = parseMBTransactions(allMBTxns);
       setTransactions(txns);
       setMbTxnCount(allMBTxns.length);
-      addLog(`[MB Bank] Tìm thấy ${txns.length} giao dịch khớp "Lunch {userName} x{SL}"`, 'success');
+      addLog(`[MB Bank] Tìm thấy ${txns.length} giao dịch khớp "PaidLunch {userName} x{SL}"`, 'success');
 
       if (txns.length === 0) {
-        addToast(`Đọc ${allMBTxns.length} giao dịch, không tìm thấy cú pháp LUNCH`, 'error');
+        addToast(`Đọc ${allMBTxns.length} giao dịch, không tìm thấy cú pháp PaidLunch`, 'error');
         return;
       }
 
-      addToast(`Đã đọc ${txns.length} giao dịch LUNCH từ MB Bank`, 'success');
+      addToast(`Đã đọc ${txns.length} giao dịch PaidLunch từ MB Bank`, 'success');
 
       if (unpaids.length > 0) {
         const newMatches = findMatches(unpaids, txns);
@@ -464,10 +465,10 @@ export default function Unpaids() {
         const workbook = XLSX.read(data, { type: 'array' });
         const txns = parseTransactions(workbook);
         setTransactions(txns);
-        addLog(`Tìm thấy ${txns.length} giao dịch khớp cú pháp LUNCH`, 'success');
+        addLog(`Tìm thấy ${txns.length} giao dịch khớp cú pháp PaidLunch`, 'success');
 
         if (txns.length === 0) {
-          addToast('Không tìm thấy giao dịch LUNCH trong file Excel', 'error');
+          addToast('Không tìm thấy giao dịch PaidLunch trong file Excel', 'error');
           return;
         }
 
@@ -717,7 +718,7 @@ export default function Unpaids() {
                       </div>
                       <div className="mb-stat">
                         <span className="mb-stat-value mb-stat-value--green">{transactions.length}</span>
-                        <span className="mb-stat-label">LUNCH GD</span>
+                        <span className="mb-stat-label">PAIDLUNCH GD</span>
                       </div>
                     </div>
                   )}
